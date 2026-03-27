@@ -264,6 +264,14 @@ class GenesisSimulator(Simulator):
                     file="urdf/plane/plane.urdf", 
                     fixed=True)
                 )
+            env_width = self._cfg.terrain.terrain_length
+            env_length = self._cfg.terrain.terrain_width
+            border = int(self._cfg.terrain.border_size/self._cfg.terrain.horizontal_scale)
+            width_per_env_pixels = int(env_width / self._cfg.terrain.horizontal_scale)
+            length_per_env_pixels = int(env_length / self._cfg.terrain.horizontal_scale)
+            tot_cols = int(self._cfg.terrain.num_cols * width_per_env_pixels) + 2 * border
+            tot_rows = int(self._cfg.terrain.num_rows * length_per_env_pixels) + 2 * border
+            self._height_samples = torch.zeros((tot_rows, tot_cols), dtype=torch.int16)
         elif mesh_type == 'heightfield':
             self._terrain = Terrain(self._cfg.terrain)
             self._create_heightfield()

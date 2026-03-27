@@ -56,7 +56,7 @@ class GO2(LeggedRobot):
         # add perceptive inputs if not blind
         if self.cfg.terrain.measure_heights:
             heights = torch.clip(self.simulator.base_pos[:, 2].unsqueeze(
-                1) - 0.5 - self.measured_heights, -1, 1.) * self.obs_scales.height_measurements
+                1) - 0.5 - self.simulator.measured_heights, -1, 1.) * self.obs_scales.height_measurements
             self.obs_buf = torch.cat((self.obs_buf, heights), dim=-1)
 
         # add noise if needed
@@ -86,7 +86,7 @@ class GO2(LeggedRobot):
             # add perceptive inputs if not blind
             if self.cfg.terrain.measure_heights:
                 heights = torch.clip(self.simulator.base_pos[:, 2].unsqueeze(
-                    1) - 0.5 - self.measured_heights, -1, 1.) * self.obs_scales.height_measurements
+                    1) - 0.5 - self.simulator.measured_heights, -1, 1.) * self.obs_scales.height_measurements
                 self.privileged_obs_buf = torch.cat((self.privileged_obs_buf, heights), dim=-1)
     
     def _get_noise_scale_vec(self):
