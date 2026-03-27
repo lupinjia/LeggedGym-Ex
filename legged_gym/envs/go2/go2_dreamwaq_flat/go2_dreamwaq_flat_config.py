@@ -34,7 +34,6 @@ class Go2DreamwaqFlatCfg( LeggedRobotDreamwaqCfg ):
     class control( Go2FlatCommonCfg.control ):
         pass
     class asset( Go2RoughCommonCfg.asset ):
-        obtain_link_contact_states = True
         pass
     class rewards( Go2RoughCommonCfg.rewards ):
         class scales( Go2RoughCommonCfg.rewards.scales ):
