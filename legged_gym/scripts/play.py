@@ -249,7 +249,6 @@ def play(args):
             raise ValueError("No runs in this directory: " + root)
     path = os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', train_cfg.runner.experiment_name, 
                             train_cfg.runner.load_run, 'exported')
-    print("EXPORT PATH", path)
     export_policy(ppo_runner, path, args, env_cfg, train_cfg)
 
     interaction_loop(env, policy, args)
