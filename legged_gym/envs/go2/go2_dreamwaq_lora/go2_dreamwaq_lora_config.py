@@ -1,10 +1,9 @@
 from legged_gym import *
-
 from legged_gym.envs.base.legged_robot_dreamwaq_config import LeggedRobotDreamwaqCfg, LeggedRobotDreamwaqCfgPPO
-from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg
-from legged_gym.envs.base.common_cfgs import Go2FlatCommonCfg, Go2RoughCommonCfg
+from legged_gym.envs.go2.go2_dreamwaq.go2_dreamwaq import Go2Dreamwaq
+from legged_gym.envs.base.common_cfgs import Go2RoughCommonCfg
 
-class Go2DreamwaqFlatCfg( LeggedRobotDreamwaqCfg ):
+class Go2DreamwaqLoraCfg( LeggedRobotDreamwaqCfg ):
     class env( LeggedRobotDreamwaqCfg.env ):
         num_envs = 3000
         num_actions = 12
@@ -22,16 +21,11 @@ class Go2DreamwaqFlatCfg( LeggedRobotDreamwaqCfg ):
         # critic_obs contains information given to critic, including some privileged information
         # This operation is to prevent the critic from receiving noisy input from the concatenation of current observation(noisy) and latent vector
     
-    class terrain( Go2FlatCommonCfg.terrain ):
-        mesh_type = "plane"
-        obtain_terrain_info_around_feet = True
-        measure_heights = True
-        measured_points_x = [-0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4] # 9x9=81
-        measured_points_y = [-0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4]
-
-    class init_state( Go2FlatCommonCfg.init_state ):
+    class terrain( Go2RoughCommonCfg.terrain ):
         pass
-    class control( Go2FlatCommonCfg.control ):
+    class init_state( Go2RoughCommonCfg.init_state ):
+        pass
+    class control( Go2RoughCommonCfg.control ):
         pass
     class asset( Go2RoughCommonCfg.asset ):
         pass
@@ -73,23 +67,33 @@ class Go2DreamwaqFlatCfg( LeggedRobotDreamwaqCfg ):
         randomize_joint_damping = False
         joint_damping_range = [0.25, 0.3]
 
-class Go2DreamwaqFlatCfgPPO( LeggedRobotDreamwaqCfgPPO ):
+class Go2DreamwaqLoraCfgPPO( LeggedRobotDreamwaqCfgPPO ):
+    runner_class_name = "DreamWaQLoRaRunner" 
     class policy( LeggedRobotDreamwaqCfgPPO.policy ):
+        base_model="/home/pablo/Documents/HCR_Genesis_LR_CL/logs/go2_flat/Apr02_01-57-54_dreamwaq_flat_genesis/model_3000.pt"
         critic_hidden_dims = [1024, 256, 128]
         encoder_hidden_dims = [256, 128]
         decoder_hidden_dims = [256, 128]
+        actor_ranks: list[int] = [4, 4, 4, 4]
+        encoder_ranks: list[int] = [4, 4, 4]
+        decoder_ranks: list[int] = [4, 4, 4]
+        latent_mu_rank: int = 4
+        vel_mu_rank: int = 4
+        latent_var_ranks: list[int] = [4] #can be in int too but list for consistency
+        vel_var_ranks: list[int] = [4] #can be in int too but list for consistency
     class algorithm( LeggedRobotDreamwaqCfgPPO.algorithm ):
         encoder_lr = 2.e-4
         num_encoder_epochs = 1
         vae_kld_weight = 2.0
     class runner( LeggedRobotDreamwaqCfgPPO.runner ):
-        run_name = 'dreamwaq_flat'
+        policy_class_name = "ActorCriticDreamWaQLoRA"
+        run_name = 'dreamwaq_lora'
         if SIMULATOR == "genesis":
             run_name += "_genesis"
         elif SIMULATOR == "isaacgym":
             run_name += "_isaacgym"
         elif SIMULATOR == "isaaclab":
             run_name += "_isaaclab"
-        experiment_name = 'go2_flat'
+        experiment_name = 'go2_lora'
         save_interval = 500
         max_iterations = 3000

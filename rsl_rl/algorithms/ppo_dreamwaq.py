@@ -31,6 +31,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from itertools import chain
 
 from rsl_rl.algorithms.ppo import PPO
 from rsl_rl.modules import ActorCriticDreamWaQ
@@ -90,9 +91,16 @@ class PPO_DreamWaQ(PPO):
         self.actor_critic = actor_critic
         self.actor_critic.to(self.device)
         self.storage = None  # initialized later
-        self.rl_parameters = list(self.actor_critic.actor.parameters()) + \
-                             list(self.actor_critic.critic.parameters()) + \
-                            [self.actor_critic.std]
+        extra = (self.actor_critic.std,) if hasattr(self.actor_critic.std, "requires_grad") else ()
+
+        self.rl_parameters = [
+            p for p in chain(
+                self.actor_critic.actor.parameters(),
+                self.actor_critic.critic.parameters(),
+                extra
+            )
+            if p.requires_grad
+        ]
         self.optimizer = optim.Adam(
             self.rl_parameters, lr=learning_rate)
         self.vae_optimizer = optim.Adam(

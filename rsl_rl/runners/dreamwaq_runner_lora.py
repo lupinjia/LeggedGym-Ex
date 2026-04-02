@@ -33,17 +33,16 @@ import os
 from collections import deque
 import statistics
 
-import wandb
-from datetime import datetime
 from torch.utils.tensorboard import SummaryWriter
 import torch
 
-from rsl_rl.algorithms import PPO
-from rsl_rl.modules import ActorCritic, ActorCriticRecurrent
+from rsl_rl.algorithms import PPO_DreamWaQ
+from rsl_rl.modules import ActorCriticDreamWaQLoRA
 from rsl_rl.env import VecEnv
+from .on_policy_runner import OnPolicyRunner
 
 
-class OnPolicyRunner:
+class DreamWaQLoRaRunner(OnPolicyRunner):
 
     def __init__(self,
                  env: VecEnv,
@@ -51,58 +50,35 @@ class OnPolicyRunner:
                  log_dir=None,
                  device='cpu'):
 
-        self.cfg=train_cfg["runner"]
-        self.alg_cfg = train_cfg["algorithm"]
-        self.policy_cfg = train_cfg["policy"]
-        self.all_cfg = train_cfg
-        self.wandb_run_name = (
-            self.cfg["experiment_name"]
-            + "_"
-            + datetime.now().strftime("%b%d_%H-%M-%S")
-            + "_"
-            + self.cfg["run_name"]
-        )
-        self.device = device
-        self.env = env
-        self._init_agent_and_algo()
-        self.num_steps_per_env = self.cfg["num_steps_per_env"]
-        self.save_interval = self.cfg["save_interval"]
-        self._init_storage()
-
-        # Log
-        self.log_dir = log_dir
-        self.sync_wandb = self.cfg["sync_wandb"] if "sync_wandb" in self.cfg else False
-        self.writer = None
-        self.tot_timesteps = 0
-        self.tot_time = 0
-        self.current_learning_iteration = 0
-
-        self.env.reset()
+        super().__init__(env, train_cfg, log_dir, device)
     
     def _init_agent_and_algo(self):
-        if self.env.num_privileged_obs is not None:
-            num_critic_obs = self.env.num_privileged_obs 
-        else:
-            num_critic_obs = self.env.num_obs
-        actor_critic_class = eval(self.cfg["policy_class_name"]) # ActorCritic
-        actor_critic: ActorCritic = actor_critic_class( self.env.num_obs,
-                                                        num_critic_obs,
+        actor_critic_class = eval(self.cfg["policy_class_name"]) # ActorCriticDreamWaQLoRA
+        print(self.policy_cfg)
+        actor_critic: ActorCriticDreamWaQLoRA = actor_critic_class( 
+                                                        self.env.num_obs,
                                                         self.env.num_actions,
+                                                        self.env.num_privileged_obs,
+                                                        self.env.num_history_obs,
+                                                        self.env.num_latent_dims,
+                                                        self.env.num_explicit_dims,
+                                                        self.env.num_decoder_output,  # dimension of decoder output, next state
                                                         **self.policy_cfg).to(self.device)
-        alg_class = eval(self.cfg["algorithm_class_name"]) # PPO
-        self.alg: PPO = alg_class(actor_critic, device=self.device, **self.alg_cfg)
+        alg_class = eval(self.cfg["algorithm_class_name"]) # PPO_DreamWaQ
+        self.alg: PPO_DreamWaQ = alg_class(actor_critic, device=self.device, **self.alg_cfg)
     
     def _init_storage(self):
+        # Init storage and model
         self.alg.init_storage(self.env.num_envs, self.num_steps_per_env, 
                               [self.env.num_obs], [self.env.num_privileged_obs], 
-                              [self.env.num_actions])
+                              [self.env.num_history_obs], [self.env.num_explicit_dims], 
+                              [self.env.num_decoder_output], [self.env.num_actions])
     
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         self._pre_learn(init_at_random_ep_len)
-        obs = self.env.get_observations()
-        privileged_obs = self.env.get_privileged_observations()
-        critic_obs = privileged_obs if privileged_obs is not None else obs
-        obs, critic_obs = obs.to(self.device), critic_obs.to(self.device)
+        obs, privileged_obs, obs_history, explicit_info_labels, next_state = self.env.get_observations()
+        obs, privileged_obs, obs_history, explicit_info_labels, next_state = obs.to(self.device), privileged_obs.to(self.device), \
+            obs_history.to(self.device), explicit_info_labels.to(self.device), next_state.to(self.device)
         self.alg.actor_critic.train() # switch to train mode (for dropout for example)
 
         ep_infos = []
@@ -117,12 +93,12 @@ class OnPolicyRunner:
             # Rollout
             with torch.inference_mode():
                 for i in range(self.num_steps_per_env):
-                    actions = self.alg.act(obs, critic_obs)
-                    obs, privileged_obs, rewards, dones, infos = self.env.step(actions)
-                    critic_obs = privileged_obs if privileged_obs is not None else obs
-                    obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
-                    self.alg.process_env_step(rewards, dones, infos)
-                    
+                    actions = self.alg.act(obs, privileged_obs, obs_history, explicit_info_labels)
+                    obs, privileged_obs, obs_history, explicit_info_labels, next_state, rewards, dones, infos = self.env.step(actions)
+                    obs, privileged_obs, obs_history, explicit_info_labels, next_state, rewards, dones = obs.to(self.device), \
+                        privileged_obs.to(self.device), obs_history.to(self.device), explicit_info_labels.to(self.device), next_state.to(self.device), rewards.to(self.device), dones.to(self.device)
+                    self.alg.process_env_step(rewards, dones, infos, next_state)
+
                     if self.log_dir is not None:
                         # Book keeping
                         if 'episode' in infos:
@@ -140,9 +116,10 @@ class OnPolicyRunner:
 
                 # Learning step
                 start = stop
-                self.alg.compute_returns(critic_obs)
-            
-            mean_value_loss, mean_surrogate_loss = self.alg.update()
+                self.alg.compute_returns(privileged_obs)
+
+            mean_value_loss, mean_surrogate_loss, mean_explicit_estimation_loss, \
+                mean_reconstruction_loss, mean_kld_loss = self.alg.update()
             stop = time.time()
             learn_time = stop - start
             if self.log_dir is not None:
@@ -154,20 +131,6 @@ class OnPolicyRunner:
         self.current_learning_iteration += num_learning_iterations
         self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)))
 
-    def _pre_learn(self, init_at_random_ep_len):
-        # initialize writer
-        if self.log_dir is not None and self.writer is None:
-            if self.sync_wandb:
-                wandb.init(
-                    project="LeggedGym-Ex",
-                    name=self.wandb_run_name,
-                    sync_tensorboard=True,
-                    config=self.all_cfg,
-                )
-            self.writer = SummaryWriter(log_dir=self.log_dir, flush_secs=10)
-        if init_at_random_ep_len:
-            self.env.episode_length_buf = torch.randint_like(self.env.episode_length_buf, high=int(self.env.max_episode_length))
-    
     def log(self, locs, width=80, pad=35):
         self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
         self.tot_time += locs['collection_time'] + locs['learn_time']
@@ -192,7 +155,11 @@ class OnPolicyRunner:
 
         self.writer.add_scalar('Loss/value_function', locs['mean_value_loss'], locs['it'])
         self.writer.add_scalar('Loss/surrogate', locs['mean_surrogate_loss'], locs['it'])
+        self.writer.add_scalar('Loss/explicit_estimation', locs['mean_explicit_estimation_loss'], locs['it'])
+        self.writer.add_scalar('Loss/reconstruction', locs['mean_reconstruction_loss'], locs['it'])
+        self.writer.add_scalar('Loss/vae_kl_divergence', locs['mean_kld_loss'], locs['it'])
         self.writer.add_scalar('Loss/learning_rate', self.alg.learning_rate, locs['it'])
+        self.writer.add_scalar("Loss/hybrid_encoder_learning_rate", self.alg.encoder_lr, locs['it'])
         self.writer.add_scalar('Policy/mean_noise_std', mean_std.item(), locs['it'])
         self.writer.add_scalar('Perf/total_fps', fps, locs['it'])
         self.writer.add_scalar('Perf/collection time', locs['collection_time'], locs['it'])
@@ -212,6 +179,9 @@ class OnPolicyRunner:
                             'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
                           f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
                           f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
+                          f"""{'Explicit Estimation loss:':>{pad}} {locs['mean_explicit_estimation_loss']:.4f}\n"""
+                          f"""{'Reconstruction loss:':>{pad}} {locs['mean_reconstruction_loss']:.4f}\n"""
+                          f"""{'VAE KL Divergence Loss:':>{pad}} {locs['mean_kld_loss']:.4f}\n"""
                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
                           f"""{'Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
                           f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n""")
@@ -236,26 +206,3 @@ class OnPolicyRunner:
                        f"""{'ETA:':>{pad}} {self.tot_time / (locs['it'] + 1) * (
                                locs['num_learning_iterations'] - locs['it']):.1f}s\n""")
         print(log_string)
-
-    def save(self, path, infos=None):
-        torch.save({
-            'model_state_dict': self.alg.actor_critic.state_dict(),
-            'optimizer_state_dict': self.alg.optimizer.state_dict(),
-            'iter': self.current_learning_iteration,
-            'infos': infos,
-            }, path)
-
-    def load(self, path, load_optimizer=True):
-        loaded_dict = torch.load(path)
-        #loaded_dict = torch.load(path)
-        self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
-        if load_optimizer:
-            self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
-        self.current_learning_iteration = loaded_dict['iter']
-        return loaded_dict['infos']
-
-    def get_inference_policy(self, device=None):
-        self.alg.actor_critic.eval() # switch to evaluation mode (dropout for example)
-        if device is not None:
-            self.alg.actor_critic.to(device)
-        return self.alg.actor_critic.act_inference

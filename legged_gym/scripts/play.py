@@ -119,10 +119,10 @@ def interaction_loop(env, policy, args):
     if args.use_joystick:
         joystick = Joystick(joystick_type=args.joystick_type)
     
-    # env.commands[:, 0] = 0.5
-    # env.commands[:, 1] = 0
-    # env.commands[:, 2] = 0
-    # env.commands[:, 3] = 0
+    env.commands[:, 0] = 0.5
+    env.commands[:, 1] = 0
+    env.commands[:, 2] = 0
+    env.commands[:, 3] = 0
     
     # interaction loop
     for i in range(10*int(env.max_episode_length)):
@@ -230,9 +230,11 @@ def play(args):
     override_configs(env_cfg, args)
 
     # prepare environment
+    #env_cfg.terrain.mesh_type = "plane"
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
     # load policy
     train_cfg.runner.resume = True
+    
     ppo_runner, train_cfg = task_registry.make_alg_runner(env=env, name=args.task, args=args, train_cfg=train_cfg)
     policy = ppo_runner.get_inference_policy(device=env.device)
     
@@ -249,7 +251,7 @@ def play(args):
             raise ValueError("No runs in this directory: " + root)
     path = os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', train_cfg.runner.experiment_name, 
                             train_cfg.runner.load_run, 'exported')
-    export_policy(ppo_runner, path, args, env_cfg, train_cfg)
+    #export_policy(ppo_runner, path, args, env_cfg, train_cfg)
 
     interaction_loop(env, policy, args)
     

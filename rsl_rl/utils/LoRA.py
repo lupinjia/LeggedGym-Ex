@@ -101,7 +101,7 @@ class LoRALinear(nn.Linear, LoRALayer):
         super().reset_parameters()
         if hasattr(self, "lora_A"):
             nn.init.uniform_(self.lora_A)
-            nn.init.uniform_(self.lora_B)
+            nn.init.zeros_(self.lora_B)
 
     @torch.no_grad()
     def train(self, mode: bool = True):

@@ -46,29 +46,55 @@ Actor-Critic for Hybrid Implicit-Explicit architecture using VAE
 class ActorCriticDreamWaQLoRA(ActorCriticDreamWaQ):
     is_recurrent = False
 
-    def __init__(self, *args,
-        base_model: str = None, 
-        actor_lora_ranks: list[int]=[4, 4, 4, 4],
-        encoder_lora_ranks: list[int]=[4,4, 2],
-        decoder_hidden_dims: list[int]=[4,4, 2],
-        **kwargs):
+    def __init__(
+        self,
+        *args,
+        base_model: str = None,
+        actor_ranks: list[int] = [4, 4, 4, 4],
+        encoder_ranks: list[int] = [4, 4, 4],
+        decoder_ranks: list[int] = [4, 4, 4],
+        latent_mu_rank: int = 4,
+        vel_mu_rank: int = 4,
+        latent_var_ranks: list[int] = [4],
+        vel_var_ranks: list[int] = [4],
+        **kwargs
+    ):
         super().__init__(*args, **kwargs)
-        self.actor = LoRA._from_sequential(self.actor, actor_lora_ranks)
-        self.vae.encoder = LoRA._from_sequential(self.vae.encoder, encoder_lora_ranks)
-        self.vae.latent_mu = LoRA.LoRALinear._from_linear(self.vae.latent_mu, 4)
-        self.vae.latent_var = LoRA._from_sequential(self.vae.latent_var, 4)
-        self.vae.vel_mu = LoRA.LoRALinear._from_linear(self.vae.vel_mu, 4)
-        self.vae.vel_var = LoRA._from_sequential(self.vae.latent_var, 4)
-        self.vae.decoder = LoRA._from_sequential(self.vae.decoder, decoder_hidden_dims)
+        print(kwargs)
 
-        if base_model is not None:
-            loaded_dict = torch.load(base_model)
-            self.load_state_dict(loaded_dict["model_state_dict"])
+        # Apply LoRA
+        self.actor = LoRA._from_sequential(self.actor, actor_ranks)
+        self.vae.encoder = LoRA._from_sequential(self.vae.encoder, encoder_ranks)
 
+        self.vae.latent_mu = LoRA.LoRALinear._from_linear(
+            self.vae.latent_mu, latent_mu_rank
+        )
+        self.vae.vel_mu = LoRA.LoRALinear._from_linear(
+            self.vae.vel_mu, vel_mu_rank
+        )
+
+        self.vae.latent_var = LoRA._from_sequential(
+            self.vae.latent_var, latent_var_ranks
+        )
+        self.vae.vel_var = LoRA._from_sequential(
+            self.vae.vel_var, vel_var_ranks
+        )
+
+        self.vae.decoder = LoRA._from_sequential(
+            self.vae.decoder, decoder_ranks
+        )
+
+        # Optional base model load
+        #if base_model is not None:
+        assert base_model is not None
+        print(f"Loading baseline: {base_model}")
+        loaded_dict = torch.load(base_model)
+        self.load_state_dict(loaded_dict["model_state_dict"])
+
+        # Debug prints
         print(f"Encoder MLP (LORA): {self.vae.encoder}")
         print(f"Decoder MLP (LORA): {self.vae.decoder}")
         print(f"Actor MLP (LORA): {self.actor}")
-        print(f"Critic MLP(LORA): {self.critic}")
 
     def load_state_dict(self, *args, **kwargs):
         super().load_state_dict(*args, **kwargs, strict=False)
