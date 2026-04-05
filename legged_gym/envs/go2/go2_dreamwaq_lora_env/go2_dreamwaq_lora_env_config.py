@@ -22,6 +22,8 @@ class Go2DreamwaqLoraCfg( LeggedRobotDreamwaqCfg ):
         # This operation is to prevent the critic from receiving noisy input from the concatenation of current observation(noisy) and latent vector
     
     class terrain( Go2RoughCommonCfg.terrain ):
+        # terrain types: [smooth slope, rough slope, stairs up, stairs down, discrete,  stepping stones, gap, pit]
+        terrain_proportions = [0, 0, 0.35, 0.25, 0, 0, 0]
         pass
     class init_state( Go2RoughCommonCfg.init_state ):
         pass
@@ -67,20 +69,24 @@ class Go2DreamwaqLoraCfg( LeggedRobotDreamwaqCfg ):
         randomize_joint_damping = False
         joint_damping_range = [0.25, 0.3]
 
+import os
+
+lora_rank = int(os.environ.get("LORA_RANK", 2))
+
 class Go2DreamwaqLoraCfgPPO( LeggedRobotDreamwaqCfgPPO ):
     runner_class_name = "DreamWaQLoRaRunner" 
     class policy( LeggedRobotDreamwaqCfgPPO.policy ):
         base_model="/home/pablo/Documents/HCR_Genesis_LR_CL/logs/go2_flat/Apr02_01-57-54_dreamwaq_flat_genesis/model_3000.pt"
-        critic_hidden_dims = [1024, 256, 128]
-        encoder_hidden_dims = [256, 128]
-        decoder_hidden_dims = [256, 128]
-        actor_ranks: list[int] = [8, 8, 8, 8]
-        encoder_ranks: list[int] = [8, 8, 8]
-        decoder_ranks: list[int] = [8, 8, 8]
-        latent_mu_rank: int = 8
-        vel_mu_rank: int = 8
-        latent_var_ranks: list[int] = [8] #can be in int too but list for consistency
-        vel_var_ranks: list[int] = [8] #can be in int too but list for consistency
+        critic_hidden_dims: list[int] = [1024, 256, 128]
+        encoder_hidden_dims: list[int] = [256, 128]
+        decoder_hidden_dims: list[int] = [256, 128]
+        actor_ranks: list[int] = [lora_rank] * 4
+        encoder_ranks: list[int] = [lora_rank] * 3
+        decoder_ranks: list[int] = [lora_rank] *3
+        latent_mu_rank: int = lora_rank
+        vel_mu_rank: int = lora_rank
+        latent_var_ranks: list[int] = [lora_rank] #can be in int too but list for consistency
+        vel_var_ranks: list[int] = [lora_rank] #can be in int too but list for consistency
     class algorithm( LeggedRobotDreamwaqCfgPPO.algorithm ):
         encoder_lr = 2.e-4
         num_encoder_epochs = 1
@@ -94,6 +100,6 @@ class Go2DreamwaqLoraCfgPPO( LeggedRobotDreamwaqCfgPPO ):
             run_name += "_isaacgym"
         elif SIMULATOR == "isaaclab":
             run_name += "_isaaclab"
-        experiment_name = 'go2_lora'
+        experiment_name = f'go2_lora_rank_{lora_rank}'
         save_interval = 500
         max_iterations = 3000

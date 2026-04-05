@@ -41,6 +41,27 @@ from rsl_rl.storage import RolloutStorageDreamWaQ
 PPO with DreamWaQ
 '''
 
+def snapshot_weights(model):
+    return {
+        name: param.detach().clone()
+        for name, param in model.named_parameters()
+    }
+
+
+def assert_weights_unchanged(model, snapshot, atol=1e-8):
+    for name, param in model.named_parameters():
+        if not ("weight" in name or "bias" in name):
+            continue
+        if "critic" in name:
+            continue
+        assert name in snapshot, f"{name} missing in snapshot"
+
+        assert torch.allclose(
+            param.detach(),
+            snapshot[name],
+            atol=atol
+        ), f"❌ Weight changed: {name} | max diff = {(param.detach() - snapshot[name]).abs().max().item()}"
+
 class PPO_DreamWaQ(PPO):
     actor_critic: ActorCriticDreamWaQ
 
@@ -90,6 +111,7 @@ class PPO_DreamWaQ(PPO):
         # PPO components
         self.actor_critic = actor_critic
         self.actor_critic.to(self.device)
+        self.snapshot = snapshot_weights(self.actor_critic)
         self.storage = None  # initialized later
         extra = (self.actor_critic.std,) if hasattr(self.actor_critic.std, "requires_grad") else ()
 
@@ -103,8 +125,10 @@ class PPO_DreamWaQ(PPO):
         ]
         self.optimizer = optim.Adam(
             self.rl_parameters, lr=learning_rate)
+        
+        self.vae_parameters = [p for p in self.actor_critic.vae.parameters() if p.requires_grad]
         self.vae_optimizer = optim.Adam(
-            self.actor_critic.vae.parameters(), lr=encoder_lr)
+            self.vae_parameters, lr=encoder_lr)
         self.transition = RolloutStorageDreamWaQ.Transition()
 
     def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, 
@@ -152,6 +176,7 @@ class PPO_DreamWaQ(PPO):
         mean_reconstruction_loss = 0
         mean_kld_loss = 0
         generator = self._get_data_generator()
+        initial_weight = self.actor_critic.vae.vel_mu.weight.detach().clone()
         for obs_batch, privileged_obs_batch, obs_histories_batch, explicit_info_labels_batch, next_state_batch, \
             terminated_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
                 old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch in generator:
@@ -177,7 +202,7 @@ class PPO_DreamWaQ(PPO):
                 self.vae_optimizer.zero_grad()
                 vae_loss.backward()
                 nn.utils.clip_grad_norm_(
-                self.actor_critic.vae.parameters(), self.max_grad_norm)
+                self.vae_parameters, self.max_grad_norm)
                 self.vae_optimizer.step()
                 
                 mean_explicit_estimation_loss += explicit_estimation_loss.item()
@@ -186,6 +211,9 @@ class PPO_DreamWaQ(PPO):
                 
             mean_value_loss += value_loss.item()
             mean_surrogate_loss += surrogate_loss.item()
+
+        #assert_weights_unchanged(self.actor_critic, self.snapshot)
+        #print("No change")
 
         num_updates = self.num_learning_epochs * self.num_mini_batches
         mean_value_loss /= num_updates

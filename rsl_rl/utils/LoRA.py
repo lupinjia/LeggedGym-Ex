@@ -94,6 +94,8 @@ class LoRALinear(nn.Linear, LoRALayer):
         )
         
         # Reset
+        # only for testing, remove in prod version
+        self.size_diff = torch.numel(self.lora_A) + torch.numel(self.lora_B) - torch.numel(self.weight)
         self.reset_parameters()
         self.merged = False
     
@@ -137,7 +139,7 @@ class LoRALinear(nn.Linear, LoRALayer):
         """
         Return the extra representation of the module.
         """
-        return f"in_features={self.in_features}, out_features={self.out_features}, bias={self.bias is not None}, rank={self.rank}"
+        return f"in_features={self.in_features}, out_features={self.out_features}, bias={self.bias is not None}, rank={self.rank}, size_diff={self.size_diff}"
     
     def state_dict(self, *args, keep_weights=False, keep_bias=False, **kwargs):
         dest = super().state_dict(*args, **kwargs)
@@ -210,6 +212,16 @@ def _from_sequential(model: nn.Sequential, ranks: Iterator[int] = None, targets:
             modules.append(layer)
     lora_model = nn.Sequential(*modules)
     return lora_model
+
+def _merge_seq(model: nn.Sequential | LoRALinear, merge: bool = True):
+    if isinstance(model, LoRALinear):
+        model.merge(merge)
+        return
+    if isinstance(model, nn.Sequential):
+        for layer in model:
+            if isinstance(layer, LoRALinear):
+                layer.merge(merge)
+
 
 
 class Constructed_LoRAs(nn.Module):

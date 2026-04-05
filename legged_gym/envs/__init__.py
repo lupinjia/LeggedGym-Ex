@@ -51,8 +51,12 @@ from legged_gym.envs.go2.go2_dreamwaq.go2_dreamwaq_config import Go2DreamwaqCfg,
 #made a syslink so the task manager doesnt get confused
 from legged_gym.envs.go2.go2_dreamwaq_flat.go2_dreamwaq_flat import Go2Dreamwaq as Go2DreamwaqFlat
 from legged_gym.envs.go2.go2_dreamwaq_flat.go2_dreamwaq_flat_config import Go2DreamwaqFlatCfg, Go2DreamwaqFlatCfgPPO
+
 from legged_gym.envs.go2.go2_dreamwaq_lora.go2_dreamwaq_lora import Go2DreamwaqLora
 from legged_gym.envs.go2.go2_dreamwaq_lora.go2_dreamwaq_lora_config import Go2DreamwaqLoraCfg, Go2DreamwaqLoraCfgPPO
+
+from legged_gym.envs.go2.go2_dreamwaq_lora_env.go2_dreamwaq_lora_env import Go2DreamwaqLora as Go2DreamwaqLoraEnv
+from legged_gym.envs.go2.go2_dreamwaq_lora_env.go2_dreamwaq_lora_env_config import Go2DreamwaqLoraCfg as Go2DreamwaqLoraEnvCfg, Go2DreamwaqLoraCfgPPO as Go2DreamwaqLoraEnvCfgPPO
 
 # go2_cat(constraint-as-termination)
 from legged_gym.envs.go2.go2_cat.go2_cat import Go2CaT
@@ -91,6 +95,7 @@ task_registry.register( "go2_cts", Go2CTS, Go2CTSCfg(), Go2CTSCfgPPO())
 task_registry.register( "go2_dreamwaq", Go2Dreamwaq, Go2DreamwaqCfg(), Go2DreamwaqCfgPPO())
 task_registry.register( "go2_dreamwaq_flat", Go2DreamwaqFlat, Go2DreamwaqFlatCfg(), Go2DreamwaqFlatCfgPPO())
 task_registry.register( "go2_dreamwaq_lora", Go2DreamwaqLora, Go2DreamwaqLoraCfg(), Go2DreamwaqLoraCfgPPO())
+task_registry.register( "go2_dreamwaq_lora_env", Go2DreamwaqLoraEnv, Go2DreamwaqLoraEnvCfg(), Go2DreamwaqLoraEnvCfgPPO())
 task_registry.register( "go2_cat", Go2CaT, Go2CaTCfg(), Go2CaTCfgPPO())
 # task_registry.register( "go2_ts_depth", Go2TSDepth, Go2TSDepthCfg(), Go2TSDepthCfgPPO())
 task_registry.register( "go2_nav", GO2Nav, GO2NavCfg(), GO2NavCfgPPO())

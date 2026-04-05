@@ -100,6 +100,7 @@ class ActorCriticDreamWaQLoRA(ActorCriticDreamWaQ):
         super().load_state_dict(*args, **kwargs, strict=False)
 
 
+
 if __name__ == "__main__":
     from legged_gym.envs.go2.go2_dreamwaq.go2_dreamwaq_config import Go2DreamwaqCfg
     from legged_gym.envs.go2.go2_dreamwaq.go2_dreamwaq_config import Go2DreamwaqCfgPPO
