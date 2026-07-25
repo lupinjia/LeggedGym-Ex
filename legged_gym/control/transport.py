@@ -52,7 +52,7 @@ METHODS = {"request_switch", "status", "pause", "resume", "estop"}
 
 
 class ControlServer:
-    def __init__(self, service, host: str = "localhost", port: int = 9013):
+    def __init__(self, service, host: str = "0.0.0.0", port: int = 9013):
         self.service = service
         self.host = host
         self.port = port

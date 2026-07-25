@@ -1,0 +1,72 @@
+# =============================================================================
+# Docker Compose — LeggedGym-Ex swap_experiment.py
+# =============================================================================
+# This service builds and immediately starts the policy-switching demo.
+# No manual commands are required after `docker compose up`.
+#
+# Quick start:
+#   1. Put your .pt checkpoint files in a ./policies/ folder next to this
+#      file (e.g. ./policies/motion.pt).
+#   2. Launch:
+#        docker compose up --build
+#   3. Open the viser viewer at http://localhost:9006
+#      and the unified control web at http://localhost:9013
+#
+# Override policy paths or backend via a .env file or CLI flags:
+#   GENESIS_BACKEND=cuda docker compose up
+#
+# Headless smoke test (no browser):
+#   docker compose run --rm -e HEADLESS=1 leggedgym
+# =============================================================================
+
+services:
+  leggedgym:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: leggedgym-ex:genesis
+    container_name: leggedgym-swap-experiment
+
+    # GPU reservation: if an NVIDIA GPU and the nvidia-container-runtime
+    # are present, the GPU is passed through.  If not, Docker ignores this
+    # section and the container runs on CPU.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    # Mount the repo live so edits on the host are reflected immediately.
+    # Also mount a read-only policies/ directory for your .pt checkpoints.
+    volumes:
+      # - .:/workspace/LeggedGym-Ex
+      - ./policies:/workspace/policies:ro
+
+    working_dir: /workspace/LeggedGym-Ex
+
+    environment:
+      SIMULATOR: genesis
+      # Genesis backend: "cuda" for GPU (falls back to CPU if unavailable),
+      # or "cpu" to force CPU-only mode.  Override in .env or via shell:
+      #   GENESIS_BACKEND=cuda docker compose up
+      GENESIS_BACKEND: ${GENESIS_BACKEND:-cpu}
+      # Which policy starts active.  Must match a discovered .pt filename
+      # (without extension).  Defaults to the first policy alphabetically.
+      ACTIVE_POLICY: ${ACTIVE_POLICY:-}
+      # Network ports exposed to the host.  Change in .env if defaults collide
+      # with another service.
+      CONTROL_PORT: ${CONTROL_PORT:-9013}
+      VISER_PORT: ${VISER_PORT:-9006}
+      # Set to 1 for a headless smoke test (no web viewer).
+      HEADLESS: ${HEADLESS:-0}
+      # Playback speed multiplier (1.0 = real-time 50 Hz).
+      SPEED: ${SPEED:-0.35}
+
+    ports:
+      - "9006:9006"   # viser 3-D viewer
+      - "9013:9013"   # unified control web
+
+    stdin_open: true
+    tty: true

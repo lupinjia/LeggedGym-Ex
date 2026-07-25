@@ -17,6 +17,7 @@ Usage:
         --active stable
 """
 import argparse
+import os
 import time
 from pathlib import Path
 
@@ -86,7 +87,16 @@ def main():
     )
 
     if SIMULATOR == "genesis":
-        gs.init(backend=gs.cpu, logging_level='warning')
+        backend = os.environ.get("GENESIS_BACKEND", "cpu").lower()
+        if backend == "cuda":
+            try:
+                gs.init(backend=gs.cuda, logging_level='warning')
+                print("Genesis initialised with CUDA backend.")
+            except Exception as e:
+                print(f"Warning: CUDA backend failed ({e}), falling back to CPU.")
+                gs.init(backend=gs.cpu, logging_level='warning')
+        else:
+            gs.init(backend=gs.cpu, logging_level='warning')
 
     env, env_cfg = task_registry.make_env(name=args.task, args=args)
     adapter = SimAdapter(env)

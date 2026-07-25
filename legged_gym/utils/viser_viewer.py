@@ -388,6 +388,7 @@ class ViserViewer:
         dof_names: Optional[List[str]] = None,
         num_envs: int = 1,
         server: Optional[object] = None,
+        host: str = "0.0.0.0",
         port: int = 8080,
     ):
         if not HAS_VISER:
@@ -402,7 +403,7 @@ class ViserViewer:
         if server is not None:
             self.server = server
         else:
-            self.server = viser.ViserServer(port=port)
+            self.server = viser.ViserServer(host=host, port=port)
 
         self._body_handles: Dict[str, object] = {}
         self._env_frames: List[object] = []
@@ -612,15 +613,16 @@ class ViserViewer:
             self.server.stop()
 
 
-def create_viser_viewer(env, port: int = 8080, robot_index: int = 0) -> ViserViewer:
+def create_viser_viewer(env, host: str = "0.0.0.0", port: int = 8080, robot_index: int = 0) -> ViserViewer:
     xml_path = env.cfg.asset.xml_file.format(LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR)
-    
+
     dof_names = env.cfg.asset.dof_names
 
     viewer = ViserViewer(
         xml_path=xml_path,
         dof_names=dof_names,
         num_envs=1,
+        host=host,
         port=port,
     )
 
