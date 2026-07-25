@@ -36,8 +36,8 @@ isaacgym = [
     "warp-lang==1.10.1",
 ]
 genesis = [
-    "torch==2.8.0+cu126",
-    "torchvision==0.23.0+cu126",
+    "torch==2.9.0+cu128",
+    "torchvision==0.24.0+cu128",
     "genesis-world==1.0.0",
     'warp-lang'
 ]

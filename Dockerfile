@@ -7,6 +7,7 @@
 # It is configured for:
 #   * Python 3.12
 #   * Genesis simulator  (CPU fallback by default, GPU libraries included)
+#   * PyTorch 2.9.0 + CUDA 12.8 — includes Blackwell (sm_120) GPU support
 #   * viser web viewer (port 9006)
 #   * FastAPI unified control web / WebSocket bridge (port 9013)
 #
@@ -25,7 +26,7 @@
 #
 # =============================================================================
 
-FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04
+FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04
 
 # Prevent apt-get from asking questions
 ENV DEBIAN_FRONTEND=noninteractive
@@ -73,14 +74,14 @@ COPY pyproject.toml ./
 # ---- Create venv and install dependencies from pyproject.toml -----------------
 # pyproject.toml is the single source of truth:
 #   * Base dependencies under [project] dependencies
-#   * Genesis-specific extras (pinned PyTorch cu126, genesis-world, warp-lang)
+#   * Genesis-specific extras (pinned PyTorch cu128, genesis-world, warp-lang)
 #     under [project.optional-dependencies] genesis
 # A fresh resolution is generated on every build so the image always picks up
 # latest compatible versions without requiring a committed lockfile.
 RUN uv venv --python 3.12 .venv \
  && . .venv/bin/activate \
  && uv pip install -r pyproject.toml --extra genesis \
-    --extra-index-url https://download.pytorch.org/whl/cu126
+    --extra-index-url https://download.pytorch.org/whl/cu128
 
 # ---- Copy the full repository ------------------------------------------------
 COPY . .
