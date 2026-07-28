@@ -12,6 +12,72 @@ from legged_gym.warp.warp_cam import WarpCam
 if SIMULATOR == "genesis":
     import genesis as gs
 
+    #----- Runtime monkey-patch for Genesis GPU device bug -----
+    # Genesis's `sanitize_index` (genesis/utils/misc.py) force-converts
+    # every input tensor to `gs.device` (CPU). When the simulation runs
+    # on CUDA, the CPU index is later used in `scatter_` on CUDA tensors,
+    # causing a RuntimeError. We monkey-patch `sanitize_index` at import
+    # time so that already-constructed torch.Tensor indices keep their
+    # original device. 
+    try:
+        import genesis.utils.misc as _gs_misc
+        _orig_sanitize_index = _gs_misc.sanitize_index
+
+        def _patched_sanitize_index(index, expected_size, max_size, dim, name):
+            if isinstance(index, torch.Tensor):
+                # Preserve device for already-materialised tensors.
+                # Convert dtype only; do NOT move to gs.device.
+                index = index.to(dtype=gs.tc_int)
+            else:
+                # Fallback for numpy arrays, lists, ints, etc.
+                index = torch.as_tensor(index, dtype=gs.tc_int, device=gs.device)
+
+            ndim = index.ndim
+            if ndim == 0:
+                index = index[None]
+            elif ndim > 1:
+                dim_info = f" `{name}`" if name else ""
+                gs.raise_exception(
+                    f"Invalid shape: {index.shape}. Expecting 0D or 1D tensor for {dim}-th index{dim_info}."
+                )
+
+            if expected_size != -1 and expected_size != len(index):
+                dim_info = f" `{name}`" if name else ""
+                gs.raise_exception(
+                    f"Invalid shape: {index.shape}. Expecting 1D tensor of length {expected_size} for {dim}-th index{dim_info}."
+                )
+            return index.contiguous()
+
+        _gs_misc.sanitize_index = _patched_sanitize_index
+    except Exception as _e:
+        import warnings
+        warnings.warn(f"Failed to monkey-patch genesis.utils.misc.sanitize_index: {_e}")
+
+    # Additional safety-net: patch torch.scatter_ / masked_scatter_ so that
+    # cross-device indices are silently moved to the target tensor's device.
+    # This compensates for any Genesis code paths that bypass sanitize_index.
+    try:
+        _orig_scatter = torch.Tensor.scatter_
+        def _patched_scatter(self, dim, index, src_or_value):
+            if isinstance(index, torch.Tensor) and index.device != self.device:
+                index = index.to(self.device)
+            return _orig_scatter(self, dim, index, src_or_value)
+        torch.Tensor.scatter_ = _patched_scatter
+    except Exception as _e:
+        import warnings
+        warnings.warn(f"Failed to monkey-patch torch.Tensor.scatter_: {_e}")
+
+    try:
+        _orig_masked_scatter = torch.Tensor.masked_scatter_
+        def _patched_masked_scatter(self, mask, source):
+            if isinstance(mask, torch.Tensor) and mask.device != self.device:
+                mask = mask.to(self.device)
+            return _orig_masked_scatter(self, mask, source)
+        torch.Tensor.masked_scatter_ = _patched_masked_scatter
+    except Exception as _e:
+        import warnings
+        warnings.warn(f"Failed to monkey-patch torch.Tensor.masked_scatter_: {_e}")
+
 """ ********** Genesis Simulator ********** """
 class GenesisSimulator(Simulator):
     def __init__(self, cfg, sim_params: dict, device, headless):
@@ -56,8 +122,8 @@ class GenesisSimulator(Simulator):
         self._base_quat_gs[:] = self._robot.get_quat()
         self._base_quat[:] = quat_wxyz_to_xyzw(self._base_quat_gs)
         self._base_euler[:] = get_euler_xyz(self._base_quat)
-        self._base_lin_vel[:] = quat_rotate_inverse(self._base_quat, self._robot.get_vel())
-        self._base_ang_vel[:] = quat_rotate_inverse(self._base_quat, self._robot.get_ang())
+        self._base_lin_vel[:] = quat_rotate_inverse(self._base_quat, self._robot.get_vel().to(self._device))
+        self._base_ang_vel[:] = quat_rotate_inverse(self._base_quat, self._robot.get_ang().to(self._device))
         self._projected_gravity = quat_rotate_inverse(self._base_quat, self._global_gravity)
         self._dof_pos[:] = self._robot.get_dofs_position(self._dof_indices)
         self._dof_vel[:] = self._robot.get_dofs_velocity(self._dof_indices)
@@ -116,6 +182,7 @@ class GenesisSimulator(Simulator):
         Args:
             env_ids (List[int]): Environemnt ids
         """
+        env_ids = env_ids.to(self._device)
 
         self._dof_pos[env_ids] = dof_pos[:]
         self._dof_vel[env_ids] = dof_vel[:]
@@ -126,14 +193,15 @@ class GenesisSimulator(Simulator):
             zero_velocity=True,
             envs_idx=env_ids,
         )
-        self._robot.zero_all_dofs_velocity(env_ids)
 
-    def reset_root_states(self, 
-                          env_ids, 
-                          base_pos, 
-                          base_quat, 
-                          base_lin_vel_w, 
+    def reset_root_states(self,
+                          env_ids,
+                          base_pos,
+                          base_quat,
+                          base_lin_vel_w,
                           base_ang_vel_w):
+        env_ids = env_ids.to(self._device)
+
         # base pos
         self._base_pos[env_ids, :] = base_pos[:]
         self._robot.set_pos(
@@ -154,8 +222,8 @@ class GenesisSimulator(Simulator):
             [base_lin_vel_w, base_ang_vel_w], dim=1)
         self._robot.set_dofs_velocity(velocity=base_vel, dofs_idx_local=[
                                      0, 1, 2, 3, 4, 5], envs_idx=env_ids)
-        self._base_lin_vel[env_ids] = quat_rotate_inverse(self._base_quat[env_ids], self._robot.get_vel()[env_ids])
-        self._base_ang_vel[env_ids] = quat_rotate_inverse(self._base_quat[env_ids], self._robot.get_ang()[env_ids])
+        self._base_lin_vel[env_ids] = quat_rotate_inverse(self._base_quat[env_ids], self._robot.get_vel().to(self._device)[env_ids])
+        self._base_ang_vel[env_ids] = quat_rotate_inverse(self._base_quat[env_ids], self._robot.get_ang().to(self._device)[env_ids])
 
     def update_sensors(self):
         # Genesis currently exposes depth update via `update_depth_images`
@@ -177,7 +245,7 @@ class GenesisSimulator(Simulator):
     def push_robots(self):
         max_push_vel_xy = self._cfg.domain_rand.max_push_vel_xy
         # in Genesis, base link also has DOF, it's 6DOF if not fixed.
-        dofs_vel = self._robot.get_dofs_velocity()  # (num_envs, num_dof) [0:3] ~ base_link_vel
+        dofs_vel = self._robot.get_dofs_velocity().to(self._device)  # (num_envs, num_dof) [0:3] ~ base_link_vel
         push_vel = torch_rand_float(-max_push_vel_xy,
                                      max_push_vel_xy, (self._num_envs, 2), self._device)
         self._rand_push_vels[:, :2] = push_vel.detach().clone()
@@ -185,7 +253,7 @@ class GenesisSimulator(Simulator):
         self._robot.set_dofs_velocity(dofs_vel)
         self._last_base_lin_vel[:] = self._base_lin_vel[:]
         self._base_lin_vel[:] = quat_rotate_inverse(
-            self._base_quat, self._robot.get_vel())
+            self._base_quat, self._robot.get_vel().to(self._device))
     
     def push_links(self):
         max_force = self._cfg.domain_rand.max_push_force
@@ -424,12 +492,12 @@ class GenesisSimulator(Simulator):
 
         # dof position limits
         self._dof_pos_limits = torch.stack(
-            self._robot.get_dofs_limit(self._dof_indices), dim=1)
+            self._robot.get_dofs_limit(self._dof_indices), dim=1).to(self._device)
         # Genesis don't provide api for accessing vel limits, so we set it here
         if hasattr(self._cfg.asset, "dof_vel_limits"):
             self._dof_vel_limits = torch.tensor(self._cfg.asset.dof_vel_limits, device=self._device).unsqueeze(0)
         self._torque_limits = self._robot.get_dofs_force_range(self._dof_indices)[
-            1]
+            1].to(self._device)
         for i in range(self._dof_pos_limits.shape[0]):
             # soft limits
             m = (self._dof_pos_limits[i, 0] + self._dof_pos_limits[i, 1]) / 2
@@ -709,7 +777,7 @@ class GenesisSimulator(Simulator):
         y_out_of_bound = (self._base_pos[:, 1] >= self._terrain_y_range[1]) | (
             self._base_pos[:, 1] <= self._terrain_y_range[0])
         out_of_bound_buf = x_out_of_bound | y_out_of_bound
-        env_ids = out_of_bound_buf.nonzero(as_tuple=False).flatten()
+        env_ids = out_of_bound_buf.nonzero(as_tuple=False).flatten().to(self._device)
         if len(env_ids) == 0:
             return
         else:
@@ -756,6 +824,7 @@ class GenesisSimulator(Simulator):
 
     def _randomize_friction(self, env_ids=None):
         ''' Randomize friction of all links'''
+        env_ids = torch.as_tensor(env_ids, device=self._device)
         min_friction, max_friction = self._cfg.domain_rand.friction_range
 
         ratios = gs.rand((len(env_ids), 1), dtype=float).repeat(1, self._robot.n_links) \
@@ -764,13 +833,15 @@ class GenesisSimulator(Simulator):
                                                 0].unsqueeze(1).detach().clone()
 
         self._robot.set_friction_ratio(
-            ratios, torch.arange(0, self._robot.n_links), env_ids)
-    
+            ratios, torch.arange(0, self._robot.n_links, device=self._device), env_ids)
+
     def _randomize_restitution(self, env_ids):
+        env_ids = torch.as_tensor(env_ids, device=self._device)
         return super()._randomize_restitution(env_ids)
 
     def _randomize_base_mass(self, env_ids=None):
         ''' Randomize base mass'''
+        env_ids = torch.as_tensor(env_ids, device=self._device)
         min_mass, max_mass = self._cfg.domain_rand.added_mass_range
         added_mass = gs.rand((len(env_ids), 1), dtype=float) * \
             (max_mass - min_mass) + min_mass
@@ -779,6 +850,7 @@ class GenesisSimulator(Simulator):
 
     def _randomize_com_displacement(self, env_ids):
         ''' Randomize center of mass displacement of the robot'''
+        env_ids = torch.as_tensor(env_ids, device=self._device)
         min_displacement_x, max_displacement_x = self._cfg.domain_rand.com_pos_x_range
         min_displacement_y, max_displacement_y = self._cfg.domain_rand.com_pos_y_range
         min_displacement_z, max_displacement_z = self._cfg.domain_rand.com_pos_z_range
@@ -797,6 +869,7 @@ class GenesisSimulator(Simulator):
             com_displacement, self._base_link_index, env_ids)
 
     def _randomize_joint_armature(self, env_ids):
+        env_ids = torch.as_tensor(env_ids, device=self._device)
         min_armature, max_armature = self._cfg.domain_rand.joint_armature_range
         armature = torch.rand((len(env_ids),), dtype=torch.float, device=self._device) \
             * (max_armature - min_armature) + min_armature
@@ -804,10 +877,11 @@ class GenesisSimulator(Simulator):
         # [len(env_ids)] -> [len(env_ids), num_actions], all joints within an env have the same armature
         armature = armature.unsqueeze(1).repeat(1, self._num_actions)
         self._robot.set_dofs_armature(
-            armature, self._dof_indices, envs_idx=env_ids) 
+            armature, self._dof_indices, envs_idx=env_ids)
         # This armature will be Refreshed when envs are reset
 
     def _randomize_joint_friction(self, env_ids):
+        env_ids = torch.as_tensor(env_ids, device=self._device)
         min_friction, max_friction = self._cfg.domain_rand.joint_friction_range
         friction = torch.rand((len(env_ids),), dtype=torch.float, device=self._device) \
             * (max_friction - min_friction) + min_friction
@@ -819,6 +893,7 @@ class GenesisSimulator(Simulator):
     def _randomize_joint_damping(self, env_ids):
         """ Randomize joint damping of the robot
         """
+        env_ids = torch.as_tensor(env_ids, device=self._device)
         min_damping, max_damping = self._cfg.domain_rand.joint_damping_range
         damping = torch.rand((len(env_ids),), dtype=torch.float, device=self._device) \
             * (max_damping - min_damping) + min_damping
@@ -828,6 +903,7 @@ class GenesisSimulator(Simulator):
             damping, self._dof_indices, envs_idx=env_ids)
 
     def _randomize_pd_gain(self, env_ids):
+        env_ids = torch.as_tensor(env_ids, device=self._device)
         self._kp_scale[env_ids] = torch_rand_float(
                 self._cfg.domain_rand.kp_range[0], self._cfg.domain_rand.kp_range[1], (len(env_ids), self._num_actions), device=self._device)
         self._kd_scale[env_ids] = torch_rand_float(
@@ -1032,5 +1108,5 @@ class GenesisSimulator(Simulator):
     
     @property
     def feet_quat(self):
-        feet_quat = self._robot.get_links_quat()[:, self._feet_indices, :]
+        feet_quat = self._robot.get_links_quat()[:, self._feet_indices, :].to(self._device)
         return feet_quat[..., [3, 0, 1, 2]] # from wxyz to xyzw

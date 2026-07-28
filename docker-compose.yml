@@ -35,7 +35,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: all
+              count: 1
               capabilities: [gpu]
 
     # Mount the repo live so edits on the host are reflected immediately.
